@@ -3,6 +3,8 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { writeFile } from 'fs/promises';
+import { Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
 
 dotenv.config();
 
@@ -25,6 +27,23 @@ export const connection = new Connection(
     }
 );
 
+// Fast API config
+export const FAST_API_KEY = process.env.FAST_API;
+if (!FAST_API_KEY) {
+    throw new Error("La clé API Fast n'est pas configurée dans le fichier .env");
+}
+
+// Wallet config
+const WALLET_PRIVATE_KEY = process.env.WALLET_PRIVATE_KEY;
+if (!WALLET_PRIVATE_KEY) {
+    throw new Error("La clé privée du wallet n'est pas configurée dans le fichier .env");
+}
+
+// Création du Keypair à partir de la clé privée
+export const WALLET_KEYPAIR = Keypair.fromSecretKey(
+    bs58.decode(WALLET_PRIVATE_KEY)
+);
+
 // Raydium API endpoints
 export const RAYDIUM_API = {
     POOLS: "https://api.raydium.io/v2/sdk/liquidity/mainnet.json",
@@ -35,8 +54,8 @@ export const RAYDIUM_API = {
 export async function downloadMainnetJson() {
     try {
         const response = await fetch(RAYDIUM_API.POOLS);
-        const rawData = await response.text(); // Get raw text first
-        console.log('Raw API response:', rawData.substring(0, 100)); // Debug first 100 chars
+        const rawData = await response.text();
+        console.log('Raw API response:', rawData.substring(0, 100));
         const data = JSON.parse(rawData);
         await writeFile(MAINNET_JSON_PATH, JSON.stringify(data, null, 2));
         console.log('Successfully downloaded mainnet.json');
