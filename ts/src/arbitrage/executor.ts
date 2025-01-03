@@ -3,11 +3,11 @@ import {
     PublicKey, 
     Transaction, 
     SystemProgram,
-    TransactionInstruction,
+    TransactionInstruction, 
     Keypair, 
-    ComputeBudgetProgram,
-    sendAndConfirmTransaction,
-    LAMPORTS_PER_SOL,
+    ComputeBudgetProgram, 
+    sendAndConfirmTransaction, 
+    LAMPORTS_PER_SOL, 
     SYSVAR_RENT_PUBKEY
 } from "@solana/web3.js";
 import { FAST_API_KEY } from "../config.js";
@@ -25,7 +25,6 @@ import {
     MAINNET_PROGRAM_ID,
     Percent
 } from "@raydium-io/raydium-sdk";
-import DLMM from '@meteora-ag/dlmm';
 import path from 'path';
 import fs from 'fs';
 
@@ -114,11 +113,31 @@ export function saveTop10Cache(opportunities: ArbitrageExecution[], raydiumPools
     // Préparer les données du cache
     const cacheData: Top10Cache = {
         timestamp: Date.now(),
-        opportunities: opportunities.slice(0, 10).map(opp => ({
-            ...opp,
-            raydiumPoolInfo: raydiumPools.find(p => p.id === opp.raydiumPoolId),
-            meteoraPoolInfo: meteoraPools.find(p => p.id === opp.meteoraPoolId)
-        }))
+        opportunities: opportunities.slice(0, 10).map(opp => {
+            const raydiumPool = raydiumPools.find(p => p.id === opp.raydiumPoolId);
+            const meteoraPool = meteoraPools.find(p => p.id === opp.meteoraPoolId);
+
+            if (!raydiumPool) {
+                console.warn(`Pool Raydium non trouvé pour l'opportunité: ${opp.raydiumPoolId}`);
+            }
+            if (!meteoraPool) {
+                console.warn(`Pool Meteora non trouvé pour l'opportunité: ${opp.meteoraPoolId}`);
+            }
+
+            return {
+                ...opp,
+                raydiumPoolInfo: raydiumPool ? {
+                    ...raydiumPool,
+                    ammId: raydiumPool.id,
+                    ammAuthority: raydiumPool.authority || raydiumPool.ammAuthority,
+                    ammOpenOrders: raydiumPool.openOrders || raydiumPool.ammOpenOrders,
+                    ammTargetOrders: raydiumPool.targetOrders || raydiumPool.ammTargetOrders,
+                    poolCoinTokenAccount: raydiumPool.baseVault || raydiumPool.poolCoinTokenAccount,
+                    poolPcTokenAccount: raydiumPool.quoteVault || raydiumPool.poolPcTokenAccount
+                } : null,
+                meteoraPoolInfo: meteoraPool || null
+            };
+        })
     };
 
     // Sauvegarder dans le fichier
@@ -218,12 +237,6 @@ async function createMeteoraSwapInstructions(
         console.log(`Direction: ${isWsolToToken ? 'SOL -> Token' : 'Token -> SOL'}`);
         console.log(`Token Address: ${tokenAddress}`);
 
-        // Récupérer les informations du pool depuis le cache
-        const cachedOpportunity = getCachedOpportunity("", poolId); // On cherche par meteoraPoolId
-        if (!cachedOpportunity) {
-            throw new Error("Informations du pool Meteora non trouvées dans le cache");
-        }
-
         // 1. Obtenir les ATAs
         const tokenAta = await getAssociatedTokenAddress(
             new PublicKey(tokenAddress),
@@ -244,9 +257,8 @@ async function createMeteoraSwapInstructions(
                 { pubkey: signer.publicKey, isSigner: true, isWritable: true },
                 { pubkey: new PublicKey(poolId), isSigner: false, isWritable: true },
                 { pubkey: tokenAta, isSigner: false, isWritable: true },
-                { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false }
+                { pubkey: NATIVE_MINT, isSigner: false, isWritable: false },
+                { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
             ],
             data: data
         });
@@ -285,12 +297,6 @@ async function createRaydiumSwapInstructions(
         console.log(`Direction: ${isWsolToToken ? 'SOL -> Token' : 'Token -> SOL'}`);
         console.log(`Token Address: ${tokenAddress}`);
 
-        // Récupérer les informations du pool depuis le cache
-        const cachedOpportunity = getCachedOpportunity(poolId, ""); // On cherche par raydiumPoolId
-        if (!cachedOpportunity || !cachedOpportunity.raydiumPoolInfo) {
-            throw new Error("Informations du pool Raydium non trouvées dans le cache");
-        }
-
         // 1. Obtenir les ATAs
         const tokenAta = await getAssociatedTokenAddress(
             new PublicKey(tokenAddress),
@@ -298,28 +304,29 @@ async function createRaydiumSwapInstructions(
         );
         console.log("Token ATA:", tokenAta.toString());
 
-        // Vérifier et afficher les informations du pool
-        console.log("Pool Info:", cachedOpportunity.raydiumPoolInfo);
+        // 2. Obtenir les informations de la pool
+        const poolInfo = await connection.getAccountInfo(new PublicKey(poolId));
+        if (!poolInfo) {
+            throw new Error("Pool non trouvée");
+        }
 
-        // 2. Créer le buffer de données pour l'instruction
+        // 3. Créer le buffer de données pour l'instruction
         const data = Buffer.alloc(1 + 8 + 8);
         data.writeUInt8(RAYDIUM_SWAP_LAYOUT.SWAP, 0);
         data.writeBigUInt64LE(BigInt(amountIn * LAMPORTS_PER_SOL), 1);
         data.writeBigUInt64LE(BigInt(0), 9);
 
-        // 3. Créer l'instruction de swap
+        // 4. Créer l'instruction de swap
         const swapIx = new TransactionInstruction({
             programId: RAYDIUM_PROGRAM_IDS[5],
             keys: [
                 { pubkey: signer.publicKey, isSigner: true, isWritable: true },
                 { pubkey: new PublicKey(poolId), isSigner: false, isWritable: true },
-                { pubkey: new PublicKey(cachedOpportunity.raydiumPoolInfo.ammId), isSigner: false, isWritable: false },
-                { pubkey: new PublicKey(cachedOpportunity.raydiumPoolInfo.ammOpenOrders), isSigner: false, isWritable: true },
-                { pubkey: new PublicKey(cachedOpportunity.raydiumPoolInfo.ammTargetOrders), isSigner: false, isWritable: true },
-                { pubkey: new PublicKey(cachedOpportunity.raydiumPoolInfo.poolCoinTokenAccount), isSigner: false, isWritable: true },
-                { pubkey: new PublicKey(cachedOpportunity.raydiumPoolInfo.poolPcTokenAccount), isSigner: false, isWritable: true },
+                { pubkey: new PublicKey("5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"), isSigner: false, isWritable: false }, // Authority
                 { pubkey: tokenAta, isSigner: false, isWritable: true },
-                { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
+                { pubkey: NATIVE_MINT, isSigner: false, isWritable: false },
+                { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
             ],
             data: data
         });
@@ -391,19 +398,17 @@ function createProfitCheckInstruction(
     signer: PublicKey,
     minBalance: number // en lamports
 ): TransactionInstruction {
-    // Cette instruction vérifiera que le solde final est supérieur au minimum requis
-    // Si ce n'est pas le cas, la transaction échouera
-    const data = Buffer.from([
-        // Ici, nous devrons implémenter une instruction personnalisée
-        // qui vérifie le solde du compte
-    ]);
-    
+    // Créer une instruction qui vérifie le solde
+    const data = Buffer.alloc(9);
+    data.writeUInt8(0, 0); // Instruction index pour vérifier le solde
+    data.writeBigUInt64LE(BigInt(minBalance), 1); // Solde minimum requis
+
     return new TransactionInstruction({
         keys: [
             { pubkey: signer, isSigner: true, isWritable: false },
-            // Ajouter d'autres comptes nécessaires
+            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }
         ],
-        programId: new PublicKey("VOTRE_PROGRAM_ID"), // ID de votre programme de vérification
+        programId: SystemProgram.programId,
         data
     });
 }
@@ -436,47 +441,9 @@ async function executeBuyMeteoraToSellRaydium(
         units: 1_400_000
     });
     const priorityFeesIx = ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: Math.floor((PRIORITY_FEES * 1_000_000) / 1_400_000) // Convertir en micro-lamports par unité
+        microLamports: Math.floor((PRIORITY_FEES * 1_000_000) / 1_400_000)
     });
     transaction.add(computeBudgetIx, priorityFeesIx);
-
-    // Obtenir les quotes avant de créer la transaction
-    const meteoraPool = await DLMM.create(connection, new PublicKey(execution.meteoraPoolId));
-    await meteoraPool.refetchStates();
-    const meteoraBinArrays = await meteoraPool.getBinArrayForSwap(true);
-    const meteoraQuote = await meteoraPool.swapQuote(
-        new BN(Math.floor(execution.amountIn * 1e9)),
-        true,
-        new BN(SLIPPAGE_BPS),
-        meteoraBinArrays
-    );
-
-    const raydiumPoolKeys = (await getRaydiumPoolKeys(connection))
-        .find(pool => pool.id.toString() === execution.raydiumPoolId);
-    if (!raydiumPoolKeys) throw new Error("Pool Raydium non trouvé");
-    
-    const token = new Token(TOKEN_PROGRAM_ID, new PublicKey(execution.tokenAddress), 9);
-    const poolInfo = await Liquidity.fetchInfo({ connection, poolKeys: raydiumPoolKeys });
-    
-    const raydiumQuote = await Liquidity.computeAmountOut({
-        poolKeys: raydiumPoolKeys,
-        poolInfo,
-        amountIn: new TokenAmount(token, execution.amountIn),
-        currencyOut: token,
-        slippage: new Percent(SLIPPAGE_BPS, 10000)
-    });
-
-    // Vérifier la profitabilité
-    const isProfitable = await verifyQuotes(
-        meteoraQuote,
-        raydiumQuote,
-        execution.amountIn,
-        execution.expectedProfit
-    );
-
-    if (!isProfitable) {
-        throw new Error("Transaction non profitable");
-    }
 
     // 1. Swap SOL -> Token sur Meteora
     console.log("1. Préparation du swap Meteora (SOL -> Token)...");
@@ -505,11 +472,6 @@ async function executeBuyMeteoraToSellRaydium(
         ...meteoraInstructions,
         ...raydiumInstructions
     );
-    
-    // Ajouter la vérification du profit avant le tip
-    const minBalanceRequired = execution.amountIn * 1e9 * (1 + MIN_PROFIT_BPS / 10000);
-    const profitCheckIx = createProfitCheckInstruction(signer.publicKey, minBalanceRequired);
-    transaction.add(profitCheckIx);
 
     // Ajouter le tip à Fast
     const tipIx = createFastTipInstruction(signer.publicKey);
@@ -534,7 +496,7 @@ async function executeBuyRaydiumToSellMeteora(
         units: 1_400_000
     });
     const priorityFeesIx = ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: Math.floor((PRIORITY_FEES * 1_000_000) / 1_400_000) // Convertir en micro-lamports par unité
+        microLamports: Math.floor((PRIORITY_FEES * 1_000_000) / 1_400_000)
     });
     transaction.add(computeBudgetIx, priorityFeesIx);
 
@@ -565,11 +527,6 @@ async function executeBuyRaydiumToSellMeteora(
         ...raydiumInstructions,
         ...meteoraInstructions
     );
-    
-    // Ajouter la vérification du profit avant le tip
-    const minBalanceRequired = execution.amountIn * 1e9 * (1 + MIN_PROFIT_BPS / 10000);
-    const profitCheckIx = createProfitCheckInstruction(signer.publicKey, minBalanceRequired);
-    transaction.add(profitCheckIx);
 
     // Ajouter le tip à Fast
     const tipIx = createFastTipInstruction(signer.publicKey);
@@ -584,12 +541,6 @@ export async function executeArbitrage(
     connection: Connection
 ) {
     try {
-        // Récupérer l'opportunité du cache
-        const cachedOpportunity = getCachedOpportunity(execution.raydiumPoolId, execution.meteoraPoolId);
-        if (!cachedOpportunity) {
-            throw new Error("Opportunité non trouvée dans le cache ou cache expiré");
-        }
-
         // Sélectionner la stratégie appropriée
         const transaction = execution.buyOnMeteora 
             ? await executeBuyMeteoraToSellRaydium(execution, signer, connection)
@@ -641,8 +592,8 @@ export async function executeArbitrage(
 
         const result = await response.json();
         
-        if (result.result) {
-            const txHash = result.result;
+        if (result.result && result.result.signature) {
+            const txHash = result.result.signature;
             console.log('\n=== Transaction envoyée avec succès ===');
             console.log(`Hash: ${txHash}`);
             console.log(`Explorer: https://solscan.io/tx/${txHash}`);
