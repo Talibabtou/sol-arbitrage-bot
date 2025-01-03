@@ -65,3 +65,9 @@ export async function downloadMainnetJson() {
         throw error;
     }
 }
+
+export const CONFIG = {
+    RPC_URL: process.env.RPC_ENDPOINT || "https://api.mainnet-beta.solana.com",
+    WALLET_SECRET_KEY: process.env.WALLET_KEY || "", // Optionnel pour juste lire les pools
+    API_HOST: undefined // Par défaut pour mainnet
+}
