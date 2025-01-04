@@ -1,5 +1,5 @@
-import { Connection, Keypair, PublicKey, Transaction, ComputeBudgetProgram, SystemProgram, createInitializeAccountInstruction, createSyncNativeInstruction, createCloseAccountInstruction, TOKEN_PROGRAM_ID } from "@solana/web3.js";
-import { NATIVE_MINT } from "@solana/spl-token";
+import { Connection, Keypair, PublicKey, Transaction, ComputeBudgetProgram, SystemProgram } from "@solana/web3.js";
+import { NATIVE_MINT, TOKEN_PROGRAM_ID, createInitializeAccountInstruction, createSyncNativeInstruction, createCloseAccountInstruction } from "@solana/spl-token";
 import * as dotenv from "dotenv";
 import bs58 from "bs58";
 import { BN } from 'bn.js';
@@ -174,40 +174,8 @@ async function executeSwap(connection: Connection, signer: Keypair, poolAddress:
     );
     console.log(`Quote minimum: ${swapQuote.minOutAmount.toString()} USDC`);
 
-    // Créer la transaction
-    const transaction = new Transaction();
-
-    // Ajouter l'instruction de compute budget
-    const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
-        units: 114585
-    });
-    transaction.add(computeBudgetIx);
-
-    // Créer un compte WSOL temporaire
-    const wsolAccount = Keypair.generate();
-    const rent = await connection.getMinimumBalanceForRentExemption(165);
-    const createWsolAccountIx = SystemProgram.createAccount({
-        fromPubkey: signer.publicKey,
-        newAccountPubkey: wsolAccount.publicKey,
-        lamports: AMOUNT_IN.toNumber() + rent,
-        space: 165,
-        programId: TOKEN_PROGRAM_ID
-    });
-    transaction.add(createWsolAccountIx);
-
-    // Initialiser le compte WSOL
-    const initWsolAccountIx = createInitializeAccountInstruction(
-        wsolAccount.publicKey,
-        SOL_MINT,
-        signer.publicKey
-    );
-    transaction.add(initWsolAccountIx);
-
-    // Synchroniser le compte WSOL
-    const syncNativeIx = createSyncNativeInstruction(wsolAccount.publicKey);
-    transaction.add(syncNativeIx);
-
-    // Créer l'instruction de swap
+    // Créer l'instruction de swap (qui gère déjà le compute budget et le WSOL en interne)
+    console.log("\nCréation de la transaction...");
     const swapTx = await dlmmPool.swap({
         inToken: SOL_MINT,
         outToken: USDC_MINT,
@@ -217,20 +185,13 @@ async function executeSwap(connection: Connection, signer: Keypair, poolAddress:
         user: signer.publicKey,
         minOutAmount: swapQuote.minOutAmount
     });
-    transaction.add(...swapTx.instructions);
-
-    // Fermer le compte WSOL temporaire
-    const closeWsolAccountIx = createCloseAccountInstruction(
-        wsolAccount.publicKey,
-        signer.publicKey,
-        signer.publicKey
-    );
-    transaction.add(closeWsolAccountIx);
 
     // Finaliser et envoyer la transaction
+    const transaction = new Transaction();
+    transaction.add(...swapTx.instructions);
     transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
     transaction.feePayer = signer.publicKey;
-    transaction.sign(signer, wsolAccount);
+    transaction.sign(signer);
 
     console.log("\nEnvoi de la transaction...");
     const txid = await connection.sendRawTransaction(transaction.serialize());
