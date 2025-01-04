@@ -1,11 +1,11 @@
 {
   "name": "solana-arb-bot",
   "version": "1.0.0",
-  "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "set NODE_NO_WARNINGS=1 && tsx src/index.ts",
-    "debug": "set NODE_NO_WARNINGS=1 && tsx src/debug.ts"
+    "start": "ts-node src/index.ts",
+    "test:meteora": "tsx src/test_meteora_swap.ts",
+    "test:raydium": "tsx src/test_raydium_swap.ts"
   },
   "keywords": [],
   "author": "",
@@ -19,15 +19,17 @@
     "@project-serum/serum": "^0.13.65",
     "@raydium-io/raydium-sdk": "^1.3.1-beta.58",
     "@solana/buffer-layout": "4.0.1",
-    "@solana/spl-token": "^0.3.11",
+    "@solana/spl-token": "^0.3.8",
     "@solana/spl-token-registry": "^0.2.4574",
-    "@solana/web3.js": "^1.98.0",
+    "@solana/web3.js": "^1.87.6",
     "@types/bn.js": "^5.1.6",
-    "axios": "^1.7.9",
+    "axios": "^1.6.2",
     "bn.js": "^5.2.1",
-    "bs58": "^6.0.0",
-    "dotenv": "^16.4.7",
-    "node-fetch": "^3.3.2"
+    "bs58": "^5.0.0",
+    "dotenv": "^16.3.1",
+    "node-fetch": "^3.3.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
   },
   "devDependencies": {
     "@types/bs58": "^4.0.4",
